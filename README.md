@@ -1,2 +1,2 @@
 # XmlKeyRefCompletion
-VisualStudio extension for xml autocompletion based on keyref constraints from Xsd Schema
+Experimental VisualStudio extension for Xml autocompletion based on keyref constraints from Xsd Schema
