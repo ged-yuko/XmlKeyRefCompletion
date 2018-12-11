@@ -41,7 +41,7 @@ namespace XmlKeyRefCompletion
 
         public MyXmlAttribute FindAttributeAt(int lineNumber, int linePosition)
         {
-            return this.FindAt(_attributesByLine, new Location(lineNumber + 1, linePosition - 1));
+            return this.FindAt(_attributesByLine, new Location(lineNumber + 1, linePosition));
         }
 
         private T FindAt<T>(List<List<T>> list, Location loc)
@@ -60,7 +60,7 @@ namespace XmlKeyRefCompletion
                     if (index > 0)
                     {
                         var candidate = line[index - 1];
-                        if (candidate.TextLocation.Column + candidate.OuterXml.Length >= loc.Column)
+                        if (candidate.TextLocation.Column + candidate.OuterXml.Length > loc.Column)
                         {
                             result = candidate;
                         }
@@ -83,6 +83,8 @@ namespace XmlKeyRefCompletion
             {
                 result = null;
             }
+
+            Debug.Print("found " + result?.Name ?? "<NULL>");
 
             return result;
         }

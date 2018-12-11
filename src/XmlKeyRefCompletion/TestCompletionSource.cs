@@ -143,9 +143,9 @@ namespace XmlKeyRefCompletion
 
             doc.Schemas = schemaSet;
             doc.Validate((sender, ea) => {
-                System.Diagnostics.Debug.Print(ea.Severity + " : " + ea.Message);
+                System.Diagnostics.Debug.Print("Logged: " + ea.Severity + " : " + ea.Message);
                 if (ea.Exception != null)
-                    System.Diagnostics.Debug.Print(ea.Exception.ToString());
+                    System.Diagnostics.Debug.Print("Logged: " + ea.Exception.ToString());
             });
 
             foreach (var xsd in doc.Schemas.Schemas().OfType<XmlSchema>())
@@ -455,7 +455,7 @@ namespace XmlKeyRefCompletion
                 //var selectedAttribute = _repository.GetAttribute(selectedElement, lineNumber, linePosition);
 
                 var attr = doc.FindAttributeAt(lineNumber, linePosition);
-                if (attr != null && attr.PossibleValues != null)
+                if (attr != null && attr.PossibleValues != null && (attr.TextLocation.Column + attr.Name.Length < linePosition))
                 {
                     var compList = new List<Completion>();
                     foreach (string str in attr.PossibleValues)

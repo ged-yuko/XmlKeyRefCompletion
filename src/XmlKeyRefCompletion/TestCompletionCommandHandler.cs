@@ -33,6 +33,10 @@ namespace XmlKeyRefCompletion
 
         public TestCompletionHandlerProvider()
         {
+            //FileChangeListener fileChangeListener = new FileChangeListener(this, this.taskmgr);
+
+
+
         }
 
         public void VsTextViewCreated(IVsTextView textViewAdapter)
@@ -40,7 +44,7 @@ namespace XmlKeyRefCompletion
             ITextView textView = AdapterService.GetWpfTextView(textViewAdapter);
             if (textView == null)
                 return;
-            
+
             Func<TestCompletionCommandHandler> createCommandHandler = delegate () { return new TestCompletionCommandHandler(textViewAdapter, textView, this); };
             textView.Properties.GetOrCreateSingletonProperty(createCommandHandler);
         }
@@ -65,7 +69,46 @@ namespace XmlKeyRefCompletion
 
         public int QueryStatus(ref Guid pguidCmdGroup, uint cCmds, OLECMD[] prgCmds, IntPtr pCmdText)
         {
-            return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
+            for (int i = 0; i < cCmds; i++)
+            {
+                // var status = QueryStatusImpl(pguidCmdGroup, prgCmds[i]);
+
+                //private int QueryStatusImpl(Guid pguidCmdGroup, OLECMD cmd)
+                //{
+                if (pguidCmdGroup == typeof(VSConstants.VSStd2KCmdID).GUID)
+                {
+                    var cmd = prgCmds[i];
+                    // Debug.Print("Query {0}-{1}", "VSStd2KCmdID", (VSConstants.VSStd2KCmdID)cmd.cmdID);
+
+                    switch ((VSConstants.VSStd2KCmdID)cmd.cmdID)
+                    {
+                        case VSConstants.VSStd2KCmdID.SHOWMEMBERLIST:
+                        case VSConstants.VSStd2KCmdID.COMPLETEWORD:
+                        //case VSConstants.VSStd2KCmdID.PARAMINFO:
+                        //case VSConstants.VSStd2KCmdID.QUICKINFO:
+                        case VSConstants.VSStd2KCmdID.AUTOCOMPLETE:
+                            prgCmds[i].cmdf = (uint)((int)OLECMDF.OLECMDF_ENABLED | (int)OLECMDF.OLECMDF_SUPPORTED);
+                            break;
+                        //return (int)OLECMDF.OLECMDF_ENABLED | (int)OLECMDF.OLECMDF_SUPPORTED;
+                        default:
+                            return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
+                    }
+                }
+                else
+                {
+                    return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
+                }
+                //return VSConstants.E_FAIL;
+                //}
+
+                //if (status == VSConstants.E_FAIL)
+                //    return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
+                //else
+                //    prgCmds[i].cmdf = (uint)status;
+            }
+            return VSConstants.S_OK;
+
+            //return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
         }
 
         public int Exec(ref Guid pguidCmdGroup, uint nCmdID, uint nCmdexecopt, IntPtr pvaIn, IntPtr pvaOut)
@@ -74,6 +117,23 @@ namespace XmlKeyRefCompletion
             {
                 return m_nextCommandHandler.Exec(ref pguidCmdGroup, nCmdID, nCmdexecopt, pvaIn, pvaOut);
             }
+
+            //Debug.Print("Exec {0}-{1}", nCmdID, nCmdexecopt);
+            //var cmdGroups = new Dictionary<Guid, Type>() {
+            //    { VSConstants.VSStd2K, typeof(VSConstants.VSStd2KCmdID) },
+            //    { VSConstants.VsStd2010, typeof(VSConstants.VSStd2010CmdID) },
+            //    { VSConstants.VsStd11, typeof(VSConstants.VSStd11CmdID) },
+            //    { VSConstants.VsStd12, typeof(VSConstants.VSStd12CmdID) },
+            //    { VSConstants.VsStd14, typeof(VSConstants.VSStd14CmdID) },
+            //    { VSConstants.VsStd15, typeof(VSConstants.VSStd15CmdID) },
+            //    //{ VSConstants.VsStd97, typeof(VSConstants.VSStd97CmdID) },
+            //};
+
+            //if (cmdGroups.TryGetValue(pguidCmdGroup, out var t))
+            //{
+            //    Debug.Print("\t{0}:{1}", t, Enum.ToObject(t, nCmdID));
+            //}
+
             //make a copy of this so we can look at it after forwarding some commands
             uint commandID = nCmdID;
             char typedChar = char.MinValue;
@@ -109,12 +169,19 @@ namespace XmlKeyRefCompletion
             //pass along the command so the char is added to the buffer
             int retVal = m_nextCommandHandler.Exec(ref pguidCmdGroup, nCmdID, nCmdexecopt, pvaIn, pvaOut);
             bool handled = false;
-            if (!typedChar.Equals(char.MinValue) && char.IsLetterOrDigit(typedChar))
+            if ((!typedChar.Equals(char.MinValue) && char.IsLetterOrDigit(typedChar))
+                || (pguidCmdGroup == VSConstants.VSStd2K && (nCmdID == (uint)VSConstants.VSStd2KCmdID.AUTOCOMPLETE
+                    || nCmdID == (uint)VSConstants.VSStd2KCmdID.COMPLETEWORD
+                    || nCmdID == (uint)VSConstants.VSStd2KCmdID.SHOWMEMBERLIST
+                )))
             {
                 if (m_session == null || m_session.IsDismissed) // If there is no active session, bring up completion
                 {
                     this.TriggerCompletion();
-                    if (m_session != null) // TODO: wtf?
+                    if (m_session != null && !((nCmdID == (uint)VSConstants.VSStd2KCmdID.AUTOCOMPLETE
+                    || nCmdID == (uint)VSConstants.VSStd2KCmdID.COMPLETEWORD
+                    || nCmdID == (uint)VSConstants.VSStd2KCmdID.SHOWMEMBERLIST
+                ))) // TODO: wtf?
                     {
                         m_session.Filter();
                     }
@@ -155,6 +222,7 @@ namespace XmlKeyRefCompletion
             //subscribe to the Dismissed event on the session 
             m_session.Dismissed += this.OnSessionDismissed;
             m_session.Start();
+            // m_session.Filter();
 
             return true;
         }
