@@ -64,9 +64,6 @@
     <Compile Include="XmlRepository.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="KeyRefCompletionControl.xsd">
-      <SubType>Designer</SubType>
-    </None>
     <None Include="packages.config" />
     <None Include="source.extension.vsixmanifest">
       <SubType>Designer</SubType>

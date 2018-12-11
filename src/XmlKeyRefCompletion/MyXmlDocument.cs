@@ -23,6 +23,7 @@ namespace XmlKeyRefCompletion
         readonly XmlTextReader _reader;
         readonly List<List<MyXmlElement>> _elementsByLine = new List<List<MyXmlElement>>();
         readonly List<List<MyXmlAttribute>> _attributesByLine = new List<List<MyXmlAttribute>>();
+        readonly List<List<MyXmlText>> _textByLine = new List<List<MyXmlText>>();
 
 
         private MyXmlDocument(XmlTextReader reader)
@@ -41,7 +42,12 @@ namespace XmlKeyRefCompletion
 
         public MyXmlAttribute FindAttributeAt(int lineNumber, int linePosition)
         {
-            return this.FindAt(_attributesByLine, new Location(lineNumber + 1, linePosition));
+            return this.FindAt(_attributesByLine, new Location(lineNumber + 1, linePosition + 1));
+        }
+
+        public MyXmlText FindTextAt(int lineNumber, int linePosition)
+        {
+            return this.FindAt(_textByLine, new Location(lineNumber + 1, linePosition + 1));
         }
 
         private T FindAt<T>(List<List<T>> list, Location loc)
@@ -60,14 +66,16 @@ namespace XmlKeyRefCompletion
                     if (index > 0)
                     {
                         var candidate = line[index - 1];
-                        if (candidate.TextLocation.Column + candidate.OuterXml.Length > loc.Column)
-                        {
-                            result = candidate;
-                        }
-                        else
-                        {
-                            result = null;
-                        }
+                        //if (candidate.TextLocation.Column + candidate.OuterXml.Length > loc.Column)
+                        //{
+                        //    result = candidate;
+                        //}
+                        //else
+                        //{
+                        //    result = null;
+                        //}
+
+                        result = candidate;
                     }
                     else
                     {
@@ -99,19 +107,9 @@ namespace XmlKeyRefCompletion
             return this.Register(_attributesByLine, this.SetTextInfo(new MyXmlAttribute(prefix, localName, namespaceURI, this)));
         }
 
-        public override XmlNode CreateNode(string nodeTypeString, string name, string namespaceURI)
+        public override XmlText CreateTextNode(string text)
         {
-            return base.CreateNode(nodeTypeString, name, namespaceURI);
-        }
-
-        public override XmlNode CreateNode(XmlNodeType type, string name, string namespaceURI)
-        {
-            return base.CreateNode(type, name, namespaceURI);
-        }
-
-        public override XmlNode CreateNode(XmlNodeType type, string prefix, string name, string namespaceURI)
-        {
-            return base.CreateNode(type, prefix, name, namespaceURI);
+            return this.Register(_textByLine, this.SetTextInfo(new MyXmlText(text, this)));
         }
 
         private T SetTextInfo<T>(T node)
@@ -175,5 +173,12 @@ namespace XmlKeyRefCompletion
             this.CompletionName = name;
             this.PossibleValues = values;
         }
+    }
+
+    class MyXmlText : XmlText, IXmlTextInfoNode
+    {
+        public Location TextLocation { get; set; }
+
+        internal MyXmlText(string strData, XmlDocument doc) : base(strData, doc) { }
     }
 }

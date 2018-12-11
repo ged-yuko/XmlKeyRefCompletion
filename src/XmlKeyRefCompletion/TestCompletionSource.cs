@@ -455,7 +455,9 @@ namespace XmlKeyRefCompletion
                 //var selectedAttribute = _repository.GetAttribute(selectedElement, lineNumber, linePosition);
 
                 var attr = doc.FindAttributeAt(lineNumber, linePosition);
-                if (attr != null && attr.PossibleValues != null && (attr.TextLocation.Column + attr.Name.Length < linePosition))
+                var text = doc.FindTextAt(lineNumber, linePosition);
+                //if (attr != null && attr.PossibleValues != null && (attr.TextLocation.Column + attr.Name.Length < linePosition))
+                if (attr != null && text != null && text.ParentNode == attr && linePosition < text.TextLocation.Column + text.Length)
                 {
                     var compList = new List<Completion>();
                     foreach (string str in attr.PossibleValues)
