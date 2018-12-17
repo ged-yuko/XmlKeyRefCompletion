@@ -52,7 +52,7 @@ namespace XmlKeyRefCompletion
                 if (session.TextView.Properties.TryGetProperty<XmlKeyRefCompletionCommandHandler>(typeof(XmlKeyRefCompletionCommandHandler).GUID, out var completionCommandHandler))
                 {
 
-                    var doc = completionCommandHandler.CurrentDocumentData;
+                    var doc = completionCommandHandler.DocumentDataLoader.DocumentData;
                     if (doc != null)
                     {
 
@@ -64,7 +64,7 @@ namespace XmlKeyRefCompletion
                         var linePosition = point.Position - line.Start.Position;
 
                         var text = doc.FindTextAt(lineNumber, linePosition);
-                        var attr = text.ParentNode as MyXmlAttribute;
+                        var attr = text?.ParentNode as MyXmlAttribute;
 
                         if (text != null && attr != null && attr.ReferencedKeyPartData != null && linePosition < text.TextLocation.Column + text.Length)
                         {

@@ -12,6 +12,7 @@ using System.ComponentModel.Composition;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using XmlKeyRefCompletion.Doc;
 using IOleServiceProvider = Microsoft.VisualStudio.OLE.Interop.IServiceProvider;
 using MsVsShell = Microsoft.VisualStudio.Shell;
 
@@ -38,41 +39,16 @@ namespace XmlKeyRefCompletion
         private void ReloadXmlDoCompletionData(uint docCookie)
         {
             var doc = _rdt.GetDocumentInfo(docCookie);
-            var docTextBufferAdapter = doc.DocData as IVsTextBuffer;
-
-            // docTextBufferAdapter.GetLanguageServiceID(out var langSvcId);
-
-            // TODO: if (langSvcId == xmlLangSvcID)
-
-            IComponentModel componentModel = Package.GetGlobalService(typeof(SComponentModel)) as IComponentModel;
-            IVsEditorAdaptersFactoryService editorFactory = componentModel.GetService<IVsEditorAdaptersFactoryService>();
-            ITextBuffer docTextBuffer = editorFactory.GetDataBuffer(docTextBufferAdapter);
-            
-            if (docTextBuffer.Properties.TryGetProperty<XmlKeyRefCompletionCommandHandler>(typeof(XmlKeyRefCompletionCommandHandler).GUID, out var completionCommandHandler))
-                completionCommandHandler.ReloadDocument();
-        }
-
-        public void GetDocCookie(IVsTextView vsTextView)
-        {
-            if (vsTextView == null)
-                throw new ArgumentNullException(nameof(vsTextView));
-
-            if (ErrorHandler.Failed(vsTextView.GetBuffer(out var textLines)))
-                return;
+            // var docTextBufferAdapter = doc.DocData as IVsTextBuffer;
+            var textLines = doc.DocData as IVsTextLines;
 
             IVsUserData userData = textLines as IVsUserData;
-            if (userData == null)
-                return;
-
-            Guid monikerGuid = typeof(IVsUserData).GUID;
-            if (ErrorHandler.Failed(userData.GetData(ref monikerGuid, out var monikerObj)))
+            if (userData != null)
             {
-                return;
+                Guid id = typeof(XmlKeyRefCompletionCommandHandler).GUID;
+                userData.GetData(ref id, out var cmdHandler);
+                (cmdHandler as XmlKeyRefCompletionCommandHandler)?.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.InitTimeout);
             }
-
-            string filePath = monikerObj as string;
-
-            _rdt.FindDocument(filePath, out var hierarchy, out var itemId, out var docCookie);
         }
 
         #region IDisposable Support

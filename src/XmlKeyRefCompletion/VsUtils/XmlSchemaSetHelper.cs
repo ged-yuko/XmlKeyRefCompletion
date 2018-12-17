@@ -10,15 +10,21 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Xml;
 using System.Xml.Schema;
 using Package = Microsoft.XmlEditor.Package;
 
 namespace XmlKeyRefCompletion.VsUtils
 {
-    static class XmlSchemaSetHelper
+    internal class XmlSchemaSetHelper
     {
-        public static XmlSchemaSet ResolveSchemaSetForXmlDocTextView(ITextView textView)
+        private readonly XmlDocument _doc;
+
+        public XmlSchemaSetHelper(XmlDocument doc)
+        {
+            _doc = doc;
+        }
+
+        public static bool TryParseXmlDocFromTextView(ITextView textView, out XmlSchemaSetHelper helper)
         {
             IComponentModel componentModel = Package.GetGlobalService(typeof(SComponentModel)) as IComponentModel;
             IVsEditorAdaptersFactoryService editorFactory = componentModel.GetService<IVsEditorAdaptersFactoryService>();
@@ -28,36 +34,52 @@ namespace XmlKeyRefCompletion.VsUtils
 
             var source = langSvc.GetSource(view);
 
-            var schemaCache = new MySchemaCache();
-
             var doc = langSvc.GetParseTree(source, view, 0, 0, ParseReason.CodeSpan);
-            if (doc == null || true.Equals(doc.GetProperty("IsSchema")))
-                return null;
+
+            if (doc != null && false.Equals(doc.GetProperty("IsSchema")))
+            {
+                helper = new XmlSchemaSetHelper(doc);
+            }
+            else
+            {
+                helper = null;
+            }
+
+            return helper != null;
+        }
+
+        public bool TryResolveSchemaSetForXmlDocTextView(out XmlSchemaSet xmlSchemaSet, out bool retryLater)
+        {
+            var schemaCache = new MySchemaCache();
 
             NamespaceFilter filter = nsuri => nsuri == "http://www.w3.org/2001/XMLSchema-instance";
 
-            var schemas = (IList<XmlSchemaReference>)doc.GetProperty("Schemas").CallMethod("GetValidationSet", filter);
+            var schemas = (IList<XmlSchemaReference>)_doc.GetProperty("Schemas").CallMethod("GetValidationSet", filter);
 
             var options = new XmlProjectOptions();
             var errorsList = new ErrorNodeList();
             var errorHandler = new Microsoft.XmlEditor.ErrorHandler(errorsList);
 
-            IList<XmlSchemaReference> candidateSchemas = schemaCache.GetCandidateSchemas(doc);
-            IList<XmlSchemaReference> associatedSchemas = schemaCache.GetAssociatedSchemas(doc, options, errorHandler);
+            IList<XmlSchemaReference> candidateSchemas = schemaCache.GetCandidateSchemas(_doc);
+            IList<XmlSchemaReference> associatedSchemas = schemaCache.GetAssociatedSchemas(_doc, options, errorHandler);
             XmlSchemaSetBuilder schemaSetBuilder = schemaCache.SchemaSetBuilder;
 
             IList<XmlSchemaReference> sources = schemaSetBuilder.Sources;
             sources.Clear();
             schemaSetBuilder.Candidates = candidateSchemas;
+
             foreach (XmlSchemaReference item in associatedSchemas)
                 sources.Add(item);
             foreach (XmlSchemaReference schema in schemas)
                 sources.Add(schema);
+
             schemaSetBuilder.Compile();
 
-            var xmlSchemaSet = schemaSetBuilder.CompiledSet;
+            xmlSchemaSet = schemaSetBuilder.CompiledSet;
 
-            return xmlSchemaSet;
+            retryLater = (sources.Count > 0 || candidateSchemas.Count > 0) && xmlSchemaSet.Count == 0;
+
+            return xmlSchemaSet != null && xmlSchemaSet.Count > 0;
         }
     }
 }

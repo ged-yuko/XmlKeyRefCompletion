@@ -65,7 +65,7 @@ namespace XmlKeyRefCompletion.VsUtils
                 packages.Add(pp[0]);
 
             var xmlEditorPackageId = Guid.Parse("87569308-4813-40A0-9CD0-D7A30838CA3F");
-            var xmlEditorVsPackage = packages.FirstOrDefault(p => p.GetType().TryGetCustomAttribute<GuidAttribute>(out var id) && Guid.Parse(id.Value) == xmlEditorPackageId);
+            var xmlEditorVsPackage = packages.OfType<Package>().FirstOrDefault();
 
             _schemaCache = xmlEditorVsPackage.CallMethod("GetCache");
         }

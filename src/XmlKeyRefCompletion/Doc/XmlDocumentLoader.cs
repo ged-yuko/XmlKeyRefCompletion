@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Timers;
 using System.Xml;
 using System.Xml.Schema;
 using XmlKeyRefCompletion.VsUtils;
@@ -13,9 +14,41 @@ namespace XmlKeyRefCompletion.Doc
 {
     internal class XmlDocumentLoader
     {
-        public XmlDocumentLoader()
-        {
+        public static readonly TimeSpan InitTimeout = TimeSpan.FromSeconds(1);
+        public static readonly TimeSpan EditTimeout = TimeSpan.FromSeconds(3);
 
+        private readonly Timer _reloadTimer;
+
+        public MyXmlDocument DocumentData { get; private set; }
+
+        private readonly ITextView _textView;
+
+        public XmlDocumentLoader(ITextView textView)
+        {
+            _textView = textView;
+
+            _reloadTimer = new Timer() {
+                Interval = 1000,
+                AutoReset = false,
+            };
+
+            _reloadTimer.Elapsed += (sender, ea) => this.ReloadDocument();
+
+            this.ReloadDocument();
+        }
+
+        private void ReloadDocument()
+        {
+            Debug.Print("Reloading..");
+            this.DocumentData = this.TryLoadDocument(_textView, out var doc) ? doc : null;
+        }
+
+        public void ScheduleReloading(TimeSpan interval)
+        {
+            Debug.Print("Scheduling reload in " + interval);
+            _reloadTimer.Stop();
+            _reloadTimer.Interval = interval.TotalMilliseconds;
+            _reloadTimer.Start();
         }
 
         private bool TryFillCompletionData(MyXmlDocument doc)
@@ -164,27 +197,44 @@ namespace XmlKeyRefCompletion.Doc
             }
         }
 
-        public bool TryLoadDocument(ITextView textView, out MyXmlDocument doc)
+        private bool TryLoadDocument(ITextView textView, out MyXmlDocument doc)
         {
-            var text = textView.TextBuffer.CurrentSnapshot.GetText();
-            doc = MyXmlDocument.LoadWithTextInfo(new StringReader(text));
+            try
+            {
+                if (XmlSchemaSetHelper.TryParseXmlDocFromTextView(textView, out var schemaSetHelper))
+                {
+                    if (schemaSetHelper.TryResolveSchemaSetForXmlDocTextView(out var schemaSet, out var retryLater))
+                    {
+                        var text = textView.TextBuffer.CurrentSnapshot.GetText();
+                        doc = MyXmlDocument.LoadWithTextInfo(new StringReader(text));
 
-            var schemaSet = XmlSchemaSetHelper.ResolveSchemaSetForXmlDocTextView(textView);
-            if (schemaSet == null)
+                        doc.Schemas = schemaSet;
+                        doc.Validate((sender, ea) => {
+                            System.Diagnostics.Debug.Print("Logged: " + ea.Severity + " : " + ea.Message);
+                            if (ea.Exception != null)
+                                System.Diagnostics.Debug.Print("Logged: " + ea.Exception.ToString());
+                        });
+
+                        if (!this.TryFillCompletionData(doc))
+                            doc = null;
+                    }
+                    else
+                    {
+                        doc = null;
+
+                        if (retryLater)
+                            this.ScheduleReloading(InitTimeout);
+                    }
+                }
+                else
+                {
+                    doc = null;
+                    this.ScheduleReloading(InitTimeout);
+                }
+            }
+            catch
             {
                 doc = null;
-            }
-            else
-            {
-                doc.Schemas = schemaSet;
-                doc.Validate((sender, ea) => {
-                    System.Diagnostics.Debug.Print("Logged: " + ea.Severity + " : " + ea.Message);
-                    if (ea.Exception != null)
-                        System.Diagnostics.Debug.Print("Logged: " + ea.Exception.ToString());
-                });
-
-                if (!this.TryFillCompletionData(doc))
-                    doc = null;
             }
 
             return doc != null;
