@@ -15,6 +15,8 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using System.Timers;
+using XmlKeyRefCompletion.Doc;
 
 namespace XmlKeyRefCompletion
 {
@@ -22,7 +24,7 @@ namespace XmlKeyRefCompletion
     [Name("token completion handler")]
     [ContentType("xml")]
     [TextViewRole(PredefinedTextViewRoles.Editable)]
-    internal class TestCompletionHandlerProvider : IVsTextViewCreationListener
+    internal class XmlKeyRefCompletionHandlerProvider : IVsTextViewCreationListener
     {
         [Import]
         internal IVsEditorAdaptersFactoryService AdapterService = null;
@@ -31,12 +33,11 @@ namespace XmlKeyRefCompletion
         [Import]
         internal SVsServiceProvider ServiceProvider { get; set; }
 
-        public TestCompletionHandlerProvider()
+        private readonly FileChangeListener _fileChangeListener;
+
+        public XmlKeyRefCompletionHandlerProvider()
         {
-            //FileChangeListener fileChangeListener = new FileChangeListener(this, this.taskmgr);
-
-
-
+            _fileChangeListener = new FileChangeListener();
         }
 
         public void VsTextViewCreated(IVsTextView textViewAdapter)
@@ -45,72 +46,79 @@ namespace XmlKeyRefCompletion
             if (textView == null)
                 return;
 
-            Func<TestCompletionCommandHandler> createCommandHandler = delegate () { return new TestCompletionCommandHandler(textViewAdapter, textView, this); };
-            textView.Properties.GetOrCreateSingletonProperty(createCommandHandler);
+            Func<XmlKeyRefCompletionCommandHandler> createCommandHandler = delegate () { return new XmlKeyRefCompletionCommandHandler(textViewAdapter, textView, this); };
+            textView.Properties.GetOrCreateSingletonProperty(typeof(XmlKeyRefCompletionCommandHandler).GUID, createCommandHandler);
         }
     }
 
-
-    internal class TestCompletionCommandHandler : IOleCommandTarget
+    [Guid("41E35D93-7736-45F0-9A74-E972B775B560")]
+    internal class XmlKeyRefCompletionCommandHandler : IOleCommandTarget
     {
         private IOleCommandTarget m_nextCommandHandler;
         private ITextView m_textView;
-        private TestCompletionHandlerProvider m_provider;
+        private XmlKeyRefCompletionHandlerProvider m_provider;
+
         private ICompletionSession m_session;
 
-        internal TestCompletionCommandHandler(IVsTextView textViewAdapter, ITextView textView, TestCompletionHandlerProvider provider)
+        public XmlDocumentLoader DocumentDataLoader { get; private set; }
+
+        internal XmlKeyRefCompletionCommandHandler(IVsTextView textViewAdapter, ITextView textView, XmlKeyRefCompletionHandlerProvider provider)
         {
-            this.m_textView = textView;
-            this.m_provider = provider;
+            if (!ErrorHandler.Failed(textViewAdapter.GetBuffer(out var textLines)))
+            {
+                IVsUserData userData = textLines as IVsUserData;
+                Guid id = typeof(XmlKeyRefCompletionCommandHandler).GUID;
+                userData.SetData(ref id, this);
+            }
+
+            this.DocumentDataLoader = new XmlDocumentLoader(textView);
+
+            m_textView = textView;
+            m_provider = provider;
 
             //add the command to the command chain
             textViewAdapter.AddCommandFilter(this, out m_nextCommandHandler);
+
+            textView.TextBuffer.PostChanged += (sender, ea) => this.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.EditTimeout);
         }
 
         public int QueryStatus(ref Guid pguidCmdGroup, uint cCmds, OLECMD[] prgCmds, IntPtr pCmdText)
         {
             for (int i = 0; i < cCmds; i++)
             {
-                // var status = QueryStatusImpl(pguidCmdGroup, prgCmds[i]);
+                var status = this.QueryStatusImpl(pguidCmdGroup, prgCmds[i]);
 
-                //private int QueryStatusImpl(Guid pguidCmdGroup, OLECMD cmd)
-                //{
-                if (pguidCmdGroup == typeof(VSConstants.VSStd2KCmdID).GUID)
-                {
-                    var cmd = prgCmds[i];
-                    // Debug.Print("Query {0}-{1}", "VSStd2KCmdID", (VSConstants.VSStd2KCmdID)cmd.cmdID);
-
-                    switch ((VSConstants.VSStd2KCmdID)cmd.cmdID)
-                    {
-                        case VSConstants.VSStd2KCmdID.SHOWMEMBERLIST:
-                        case VSConstants.VSStd2KCmdID.COMPLETEWORD:
-                        //case VSConstants.VSStd2KCmdID.PARAMINFO:
-                        //case VSConstants.VSStd2KCmdID.QUICKINFO:
-                        case VSConstants.VSStd2KCmdID.AUTOCOMPLETE:
-                            prgCmds[i].cmdf = (uint)((int)OLECMDF.OLECMDF_ENABLED | (int)OLECMDF.OLECMDF_SUPPORTED);
-                            break;
-                        //return (int)OLECMDF.OLECMDF_ENABLED | (int)OLECMDF.OLECMDF_SUPPORTED;
-                        default:
-                            return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
-                    }
-                }
-                else
-                {
+                if (status == VSConstants.E_FAIL)
                     return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
-                }
-                //return VSConstants.E_FAIL;
-                //}
-
-                //if (status == VSConstants.E_FAIL)
-                //    return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
-                //else
-                //    prgCmds[i].cmdf = (uint)status;
+                else
+                    prgCmds[i].cmdf = (uint)status;
             }
-            return VSConstants.S_OK;
 
-            //return m_nextCommandHandler.QueryStatus(ref pguidCmdGroup, cCmds, prgCmds, pCmdText);
+            return VSConstants.S_OK;
         }
 
+
+        private int QueryStatusImpl(Guid pguidCmdGroup, OLECMD cmd)
+        {
+            if (pguidCmdGroup == typeof(VSConstants.VSStd2KCmdID).GUID)
+            {
+                // Debug.Print("Query {0}-{1}", "VSStd2KCmdID", (VSConstants.VSStd2KCmdID)cmd.cmdID);
+
+                switch ((VSConstants.VSStd2KCmdID)cmd.cmdID)
+                {
+                    case VSConstants.VSStd2KCmdID.SHOWMEMBERLIST:
+                    case VSConstants.VSStd2KCmdID.COMPLETEWORD:
+                    //case VSConstants.VSStd2KCmdID.PARAMINFO:
+                    //case VSConstants.VSStd2KCmdID.QUICKINFO:
+                    case VSConstants.VSStd2KCmdID.AUTOCOMPLETE:
+                        return (int)OLECMDF.OLECMDF_ENABLED | (int)OLECMDF.OLECMDF_SUPPORTED;
+                }
+            }
+
+            return VSConstants.E_FAIL;
+        }
+
+        // TODO: clean it up
         public int Exec(ref Guid pguidCmdGroup, uint nCmdID, uint nCmdexecopt, IntPtr pvaIn, IntPtr pvaOut)
         {
             if (VsShellUtilities.IsInAutomationFunction(m_provider.ServiceProvider))
@@ -118,23 +126,18 @@ namespace XmlKeyRefCompletion
                 return m_nextCommandHandler.Exec(ref pguidCmdGroup, nCmdID, nCmdexecopt, pvaIn, pvaOut);
             }
 
-            //Debug.Print("Exec {0}-{1}", nCmdID, nCmdexecopt);
-            //var cmdGroups = new Dictionary<Guid, Type>() {
-            //    { VSConstants.VSStd2K, typeof(VSConstants.VSStd2KCmdID) },
-            //    { VSConstants.VsStd2010, typeof(VSConstants.VSStd2010CmdID) },
-            //    { VSConstants.VsStd11, typeof(VSConstants.VSStd11CmdID) },
-            //    { VSConstants.VsStd12, typeof(VSConstants.VSStd12CmdID) },
-            //    { VSConstants.VsStd14, typeof(VSConstants.VSStd14CmdID) },
-            //    { VSConstants.VsStd15, typeof(VSConstants.VSStd15CmdID) },
-            //    //{ VSConstants.VsStd97, typeof(VSConstants.VSStd97CmdID) },
-            //};
-
-            //if (cmdGroups.TryGetValue(pguidCmdGroup, out var t))
+            //var tid = pguidCmdGroup;
+            //var t = typeof(VSConstants).GetNestedTypes().FirstOrDefault(tt => tt.GUID == tid);
+            //if (t.IsEnum)
             //{
-            //    Debug.Print("\t{0}:{1}", t, Enum.ToObject(t, nCmdID));
+            //    try
+            //    {
+            //        Debug.Print("cmd: {0}: {1}", t.Name, Enum.ToObject(t, nCmdID));
+            //    }
+            //    catch { }
             //}
 
-            //make a copy of this so we can look at it after forwarding some commands
+                //make a copy of this so we can look at it after forwarding some commands
             uint commandID = nCmdID;
             char typedChar = char.MinValue;
             //make sure the input is a char before getting it
@@ -156,6 +159,8 @@ namespace XmlKeyRefCompletion
                     {
                         m_session.Commit();
                         //also, don't add the character to the buffer
+
+                        // this.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.EditTimeout);
                         return VSConstants.S_OK;
                     }
                     else
@@ -179,9 +184,9 @@ namespace XmlKeyRefCompletion
                 {
                     this.TriggerCompletion();
                     if (m_session != null && !((nCmdID == (uint)VSConstants.VSStd2KCmdID.AUTOCOMPLETE
-                    || nCmdID == (uint)VSConstants.VSStd2KCmdID.COMPLETEWORD
-                    || nCmdID == (uint)VSConstants.VSStd2KCmdID.SHOWMEMBERLIST
-                ))) // TODO: wtf?
+                        || nCmdID == (uint)VSConstants.VSStd2KCmdID.COMPLETEWORD
+                        || nCmdID == (uint)VSConstants.VSStd2KCmdID.SHOWMEMBERLIST
+                    ))) // TODO: wtf?
                     {
                         m_session.Filter();
                     }
@@ -199,6 +204,22 @@ namespace XmlKeyRefCompletion
                     m_session.Filter();
                 handled = true;
             }
+
+            //if (
+            //    (pguidCmdGroup == VSConstants.VSStd2K && (
+            //        nCmdID == (uint)VSConstants.VSStd2KCmdID.TYPECHAR||
+            //        nCmdID == (uint)VSConstants.VSStd2KCmdID.BACKSPACE ||
+            //        nCmdID == (uint)VSConstants.VSStd2KCmdID.TAB ||
+            //        nCmdID == (uint)VSConstants.VSStd2KCmdID.RETURN
+            //    )) || (pguidCmdGroup == VSConstants.GUID_VSStandardCommandSet97 && (
+            //        nCmdID == (uint)VSConstants.VSStd97CmdID.Cut ||
+            //        nCmdID == (uint)VSConstants.VSStd97CmdID.Paste ||
+            //        nCmdID == (uint)VSConstants.VSStd97CmdID.Undo ||
+            //        nCmdID == (uint)VSConstants.VSStd97CmdID.Redo
+            //    ))
+            //    )
+            //    this.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.EditTimeout);
+
             if (handled) return VSConstants.S_OK;
             return retVal;
         }

@@ -4,13 +4,15 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
+using System.Xml.Schema;
 
-namespace XmlKeyRefCompletion
+namespace XmlKeyRefCompletion.Doc
 {
-    interface IXmlTextInfoNode
+    internal interface IXmlTextInfoNode
     {
         Location TextLocation { get; set; }
 
@@ -18,32 +20,31 @@ namespace XmlKeyRefCompletion
         string Name { get; }
     }
 
-    class MyXmlDocument : XmlDocument
+    [Guid("5F05D289-1644-46B4-9526-ABA9DAAA5F91")]
+    internal class MyXmlDocument : XmlDocument
     {
-        readonly XmlTextReader _reader;
-        readonly List<List<MyXmlElement>> _elementsByLine = new List<List<MyXmlElement>>();
-        readonly List<List<MyXmlAttribute>> _attributesByLine = new List<List<MyXmlAttribute>>();
-        readonly List<List<MyXmlText>> _textByLine = new List<List<MyXmlText>>();
+        private readonly XmlTextReader _reader;
 
+        // readonly List<List<MyXmlElement>> _elementsByLine = new List<List<MyXmlElement>>();
+        // readonly List<List<MyXmlAttribute>> _attributesByLine = new List<List<MyXmlAttribute>>();
+        private readonly List<List<MyXmlText>> _textByLine = new List<List<MyXmlText>>();
+
+        public ReadOnlyCollection<MyXmlElement> AllElements { get; private set; }
+
+        private readonly List<MyXmlElement> _elements = new List<MyXmlElement>();
 
         private MyXmlDocument(XmlTextReader reader)
         {
             _reader = reader;
 
-            //var settings = reader.Settings;
-            //settings.ProhibitDtd = false;
-            //settings.IgnoreWhitespace = false;
-            //settings.CheckCharacters = false;
-            //settings.ValidationType = ValidationType.None;
-            //settings.ValidationEventHandler += (sender, ea) => { Debug.Print(ea.Message); };
-
+            this.AllElements = new ReadOnlyCollection<MyXmlElement>(_elements);
             this.Load(reader);
         }
 
-        public MyXmlAttribute FindAttributeAt(int lineNumber, int linePosition)
-        {
-            return this.FindAt(_attributesByLine, new Location(lineNumber + 1, linePosition + 1));
-        }
+        //public MyXmlAttribute FindAttributeAt(int lineNumber, int linePosition)
+        //{
+        //    return this.FindAt(_attributesByLine, new Location(lineNumber + 1, linePosition + 1));
+        //}
 
         public MyXmlText FindTextAt(int lineNumber, int linePosition)
         {
@@ -66,14 +67,6 @@ namespace XmlKeyRefCompletion
                     if (index > 0)
                     {
                         var candidate = line[index - 1];
-                        //if (candidate.TextLocation.Column + candidate.OuterXml.Length > loc.Column)
-                        //{
-                        //    result = candidate;
-                        //}
-                        //else
-                        //{
-                        //    result = null;
-                        //}
 
                         result = candidate;
                     }
@@ -99,12 +92,14 @@ namespace XmlKeyRefCompletion
 
         public override XmlElement CreateElement(string prefix, string localname, string nsURI)
         {
-            return this.Register(_elementsByLine, this.SetTextInfo(new MyXmlElement(prefix, localname, nsURI, this)));
+            var element = new MyXmlElement(prefix, localname, nsURI, this);
+            _elements.Add(element);
+            return element;
         }
 
         public override XmlAttribute CreateAttribute(string prefix, string localName, string namespaceURI)
         {
-            return this.Register(_attributesByLine, this.SetTextInfo(new MyXmlAttribute(prefix, localName, namespaceURI, this)));
+            return new MyXmlAttribute(prefix, localName, namespaceURI, this);
         }
 
         public override XmlText CreateTextNode(string text)
@@ -152,30 +147,51 @@ namespace XmlKeyRefCompletion
         }
     }
 
-    class MyXmlElement : XmlElement, IXmlTextInfoNode
+    internal class MyXmlElement : XmlElement
     {
-        public Location TextLocation { get; set; }
+        public XmlScopeData ScopeData { get; private set; }
 
         internal MyXmlElement(string prefix, string localname, string nsURI, XmlDocument doc) : base(prefix, localname, nsURI, doc) { }
-    }
 
-    class MyXmlAttribute : XmlAttribute, IXmlTextInfoNode
-    {
-        public Location TextLocation { get; set; }
-
-        internal MyXmlAttribute(string prefix, string localName, string namespaceURI, XmlDocument doc) : base(prefix, localName, namespaceURI, doc) { }
-
-        public string CompletionName { get; private set; }
-        public ReadOnlyCollection<string> PossibleValues { get; private set; }
-
-        internal void SetPossibleValues(string name, ReadOnlyCollection<string> values)
+        public XmlScopeKeyData RegisterKey(XmlSchemaKey schemaKeyInfo)
         {
-            this.CompletionName = name;
-            this.PossibleValues = values;
+            if (this.ScopeData == null)
+                this.ScopeData = new XmlScopeData(this);
+
+            return this.ScopeData.RegisterKey(schemaKeyInfo);
+        }
+
+        public XmlScopeKeyData FindKey(XmlSchemaKeyref schemaKeyRefInfo)
+        {
+            XmlScopeKeyData result;
+
+            var element = this;
+            do
+            {
+                result = element.ScopeData?.FindKey(schemaKeyRefInfo);
+                element = element.ParentNode as MyXmlElement;
+            } while (result == null && element != null);
+
+            return result;
         }
     }
 
-    class MyXmlText : XmlText, IXmlTextInfoNode
+    internal class MyXmlAttribute : XmlAttribute
+    {
+        public XmlScopeKeyPartData ReferencedKeyPartData { get; private set; }
+
+        internal MyXmlAttribute(string prefix, string localName, string namespaceURI, XmlDocument doc) : base(prefix, localName, namespaceURI, doc) { }
+
+        public void BindKeyPartData(XmlScopeKeyPartData partData)
+        {
+            if (this.ReferencedKeyPartData != null)
+                throw new InvalidOperationException();
+
+            this.ReferencedKeyPartData = partData;
+        }
+    }
+
+    internal class MyXmlText : XmlText, IXmlTextInfoNode
     {
         public Location TextLocation { get; set; }
 

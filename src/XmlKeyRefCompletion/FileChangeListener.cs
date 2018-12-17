@@ -1,81 +1,134 @@
-﻿//using Microsoft.VisualStudio.Shell;
-//using Microsoft.VisualStudio.Shell.Interop;
-//using System;
-//using System.Collections.Generic;
-//using System.ComponentModel.Composition;
-//using System.Linq;
-//using System.Text;
-//using System.Threading.Tasks;
+﻿using EnvDTE;
+using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.ComponentModelHost;
+using Microsoft.VisualStudio.Editor;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.VisualStudio.Text;
+using Microsoft.VisualStudio.TextManager.Interop;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.Composition;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using XmlKeyRefCompletion.Doc;
+using IOleServiceProvider = Microsoft.VisualStudio.OLE.Interop.IServiceProvider;
+using MsVsShell = Microsoft.VisualStudio.Shell;
 
-//namespace XmlKeyRefCompletion
-//{
-//    [Export(typeof(SaveEventsService))]
-//    internal class FileChangeListener : IVsRunningDocTableEvents3, IVsRunningDocTableEvents2, IVsRunningDocTableEvents, IVsTrackProjectDocumentsEvents2, IVsSolutionEvents, IDisposable
-//    {
-//        private IServiceProvider serviceProvider;
+namespace XmlKeyRefCompletion
+{
+    public class FileChangeListener : IDisposable, IVsRunningDocTableEvents // IVsRunningDocTableEvents3, IVsRunningDocTableEvents2, IVsTrackProjectDocumentsEvents2, IVsSolutionEvents
+    {
+        // RDT
+        private readonly uint _rdtCookie;
+        private readonly RunningDocumentTable _rdt;
 
-//        private IdleTaskManager taskMgr;
+        public FileChangeListener()
+        {
+            IOleServiceProvider sp = Package.GetGlobalService(typeof(IOleServiceProvider)) as IOleServiceProvider;
+            if (sp == null)
+                return;
 
-//        private RunningDocumentTable runningDocTable;
+            _rdt = new RunningDocumentTable(new ServiceProvider(sp));
+            if (_rdt == null) return;
 
-//        private uint trackDocEventsCookie;
+            _rdtCookie = _rdt.Advise(this);
+        }
 
-//        private bool disposed;
+        private void ReloadXmlDoCompletionData(uint docCookie)
+        {
+            var doc = _rdt.GetDocumentInfo(docCookie);
+            // var docTextBufferAdapter = doc.DocData as IVsTextBuffer;
+            var textLines = doc.DocData as IVsTextLines;
 
-//        private uint vsRDTEventscookie;
+            IVsUserData userData = textLines as IVsUserData;
+            if (userData != null)
+            {
+                Guid id = typeof(XmlKeyRefCompletionCommandHandler).GUID;
+                userData.GetData(ref id, out var cmdHandler);
+                (cmdHandler as XmlKeyRefCompletionCommandHandler)?.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.InitTimeout);
+            }
+        }
 
-//        private uint solutionEventsCookie;
+        #region IDisposable Support
 
-//        internal FileChangeListener(IServiceProvider site, IdleTaskManager taskmgr)
-//        {
-//            this.serviceProvider = site;
-//            this.taskMgr = taskmgr;
-//            this.runningDocTable = new RunningDocumentTable(site);
-//            this.AdviseRunningDocumentTableEvents(true);
-//            this.AdviceTrackProjectEvents(true);
-//            this.AdviseSolutionEvents(true);
-//        }
+        private bool disposedValue = false; // To detect redundant calls
 
-//        private void AdviceTrackProjectEvents(bool advice)
-//        {
-//            IVsTrackProjectDocuments2 vsTrackProjectDocuments = this.serviceProvider.GetService(typeof(SVsTrackProjectDocuments)) as IVsTrackProjectDocuments2;
-//            if (vsTrackProjectDocuments != null)
-//            {
-//                try
-//                {
-//                    if (advice)
-//                    {
-//                        if (!ErrorHandler.Succeeded(vsTrackProjectDocuments.AdviseTrackProjectDocumentsEvents(this, out this.trackDocEventsCookie)))
-//                        {
-//                        }
-//                    }
-//                    else if (this.trackDocEventsCookie != 0u)
-//                    {
-//                        ErrorHandler.Succeeded(vsTrackProjectDocuments.UnadviseTrackProjectDocumentsEvents(this.trackDocEventsCookie));
-//                        this.trackDocEventsCookie = 0u;
-//                    }
-//                }
-//                catch (COMException)
-//                {
-//                }
-//            }
-//        }
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    // TODO: dispose managed state (managed objects).
 
-//        private void AdviseRunningDocumentTableEvents(bool advise)
-//        {
-//            if (advise)
-//            {
-//                if (this.vsRDTEventscookie == 0u)
-//                {
-//                    this.vsRDTEventscookie = this.runningDocTable.Advise(this);
-//                    return;
-//                }
-//            }
-//            else if (this.vsRDTEventscookie != 0u)
-//            {
-//                this.runningDocTable.Unadvise(this.vsRDTEventscookie);
-//                this.vsRDTEventscookie = 0u;
-//            }
-//        }
-//    }
-//}
+                    try
+                    {
+                        if (_rdtCookie != 0)
+                            _rdt.Unadvise(_rdtCookie);
+                    }
+                    finally { }
+                }
+
+                // TODO: free unmanaged resources (unmanaged objects) and override a finalizer below.
+                // TODO: set large fields to null.
+
+                disposedValue = true;
+            }
+        }
+
+        // TODO: override a finalizer only if Dispose(bool disposing) above has code to free unmanaged resources.
+        // ~FileChangeListener() {
+        //   // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
+        //   Dispose(false);
+        // }
+
+        // This code added to correctly implement the disposable pattern.
+        void IDisposable.Dispose()
+        {
+            // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
+            this.Dispose(true);
+            // TODO: uncomment the following line if the finalizer is overridden above.
+            // GC.SuppressFinalize(this);
+        }
+
+        #endregion
+
+        #region handlers
+
+        int IVsRunningDocTableEvents.OnAfterSave(uint docCookie)
+        {
+            this.ReloadXmlDoCompletionData(docCookie);
+
+            return VSConstants.S_OK;
+        }
+
+        int IVsRunningDocTableEvents.OnAfterFirstDocumentLock(uint docCookie, uint dwRDTLockType, uint dwReadLocksRemaining, uint dwEditLocksRemaining)
+        {
+            return VSConstants.S_OK;
+        }
+
+        int IVsRunningDocTableEvents.OnBeforeLastDocumentUnlock(uint docCookie, uint dwRDTLockType, uint dwReadLocksRemaining, uint dwEditLocksRemaining)
+        {
+            return VSConstants.S_OK;
+        }
+
+        int IVsRunningDocTableEvents.OnAfterAttributeChange(uint docCookie, uint grfAttribs)
+        {
+            return VSConstants.S_OK;
+        }
+
+        int IVsRunningDocTableEvents.OnBeforeDocumentWindowShow(uint docCookie, int fFirstShow, IVsWindowFrame pFrame)
+        {
+            return VSConstants.S_OK;
+        }
+
+        int IVsRunningDocTableEvents.OnAfterDocumentWindowHide(uint docCookie, IVsWindowFrame pFrame)
+        {
+            return VSConstants.S_OK;
+        }
+
+        #endregion
+    }
+}
