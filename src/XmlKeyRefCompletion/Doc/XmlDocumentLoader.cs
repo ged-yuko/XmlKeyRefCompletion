@@ -1,4 +1,5 @@
-﻿using Microsoft.VisualStudio.Text.Editor;
+﻿using Microsoft.VisualStudio.Text;
+using Microsoft.VisualStudio.Text.Editor;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -15,11 +16,13 @@ namespace XmlKeyRefCompletion.Doc
     internal class XmlDocumentLoader
     {
         public static readonly TimeSpan InitTimeout = TimeSpan.FromSeconds(3);
-        public static readonly TimeSpan EditTimeout = TimeSpan.FromSeconds(1);
+        public static readonly TimeSpan EditTimeout = TimeSpan.FromSeconds(3);
 
         private readonly Timer _reloadTimer;
 
+        public ITextSnapshot CurrentSnapshot { get; private set; }
         public MyXmlDocument DocumentData { get; private set; }
+        public event EventHandler DocumentDataUpdated = null;
 
         private readonly ITextView _textView;
 
@@ -43,6 +46,7 @@ namespace XmlKeyRefCompletion.Doc
             {
                 Debug.Print("Reloading..");
                 this.DocumentData = this.TryLoadDocument(_textView, out var doc) ? doc : null;
+                this.DocumentDataUpdated?.Invoke(this, EventArgs.Empty);
             }
         }
 
@@ -57,6 +61,7 @@ namespace XmlKeyRefCompletion.Doc
             Debug.Print("Scheduling reload in " + interval);
 
             this.DocumentData = null;
+            this.DocumentDataUpdated?.Invoke(this, EventArgs.Empty);
 
             _reloadTimer.Stop();
             _reloadTimer.Interval = interval.TotalMilliseconds;
@@ -112,7 +117,7 @@ namespace XmlKeyRefCompletion.Doc
                         nsMan, element, schemaKey,
                         (e, k) => e.RegisterKey(k),
                         (f, n, kd) => kd.RegisterField(f),
-                        (a, pd) => pd.RegisterValue(a.Value)
+                        (a, pd) => pd.RegisterValue(a)
                     );
                 }
 
@@ -220,7 +225,8 @@ namespace XmlKeyRefCompletion.Doc
                 {
                     if (schemaSetHelper.TryResolveSchemaSetForXmlDocTextView(out var schemaSet, out var retryLater))
                     {
-                        var text = textView.TextBuffer.CurrentSnapshot.GetText();
+                        this.CurrentSnapshot = textView.TextBuffer.CurrentSnapshot;
+                        var text = this.CurrentSnapshot.GetText();
                         doc = MyXmlDocument.LoadWithTextInfo(new StringReader(text));
 
                         doc.Schemas = schemaSet;
@@ -249,8 +255,9 @@ namespace XmlKeyRefCompletion.Doc
                         this.ScheduleReloading(InitTimeout);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.Print(ex.ToString());
                 doc = null;
             }
 

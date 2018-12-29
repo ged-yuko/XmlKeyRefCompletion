@@ -1,13 +1,4 @@
-﻿using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Editor;
-using Microsoft.VisualStudio.Language.Intellisense;
-using Microsoft.VisualStudio.OLE.Interop;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Text;
-using Microsoft.VisualStudio.Text.Editor;
-using Microsoft.VisualStudio.TextManager.Interop;
-using Microsoft.VisualStudio.Utilities;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.Diagnostics;
@@ -16,6 +7,15 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Timers;
+using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.Editor;
+using Microsoft.VisualStudio.Language.Intellisense;
+using Microsoft.VisualStudio.OLE.Interop;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Text;
+using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.TextManager.Interop;
+using Microsoft.VisualStudio.Utilities;
 using XmlKeyRefCompletion.Doc;
 
 namespace XmlKeyRefCompletion
@@ -79,7 +79,7 @@ namespace XmlKeyRefCompletion
             //add the command to the command chain
             textViewAdapter.AddCommandFilter(this, out m_nextCommandHandler);
 
-            // textView.TextBuffer.PostChanged += (sender, ea) => this.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.EditTimeout);
+            textView.TextBuffer.PostChanged += (sender, ea) => this.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.EditTimeout);
         }
 
         public int QueryStatus(ref Guid pguidCmdGroup, uint cCmds, OLECMD[] prgCmds, IntPtr pCmdText)
@@ -137,7 +137,43 @@ namespace XmlKeyRefCompletion
             //    catch { }
             //}
 
-                //make a copy of this so we can look at it after forwarding some commands
+            if (pguidCmdGroup == VSConstants.GUID_VSStandardCommandSet97 && nCmdID == (int)VSConstants.VSStd97CmdID.GotoDefn)
+            {
+                var doc = this.DocumentDataLoader.DocumentData;
+                if (doc == null)
+                {
+                    this.DocumentDataLoader.ForceReload();
+                    doc = this.DocumentDataLoader.DocumentData;
+                }
+
+                if (doc != null)
+                {
+                    var pos = m_textView.Caret.Position.BufferPosition;
+                    var line = pos.GetContainingLine();
+                    var lineNumber = line.LineNumber;
+                    var linePosition = pos.Position - line.Start.Position;
+
+                    var text = doc.FindTextAt(lineNumber, linePosition);
+                    var attr = text?.ParentNode as MyXmlAttribute;
+                    if (attr != null && attr.ReferencedKeyPartData != null)
+                    {
+                        if (attr.ReferencedKeyPartData.TryGetValueDef(attr.Value, out var targetAttr))
+                        {
+                            var targetText = targetAttr.ChildNodes.OfType<MyXmlText>().FirstOrDefault();
+                            if (targetText != null)
+                            {
+                                var targetLine = this.DocumentDataLoader.CurrentSnapshot.GetLineFromLineNumber(targetText.TextLocation.Line - 1);
+                                var targetPosition = targetLine.Start.Position + targetText.TextLocation.Column - 1;
+
+                                m_textView.Caret.MoveTo(new SnapshotPoint(this.DocumentDataLoader.CurrentSnapshot, targetPosition));
+                                m_textView.Caret.EnsureVisible();
+                            }
+                        }
+                    }
+                }
+            }
+
+            //make a copy of this so we can look at it after forwarding some commands
             uint commandID = nCmdID;
             char typedChar = char.MinValue;
             //make sure the input is a char before getting it

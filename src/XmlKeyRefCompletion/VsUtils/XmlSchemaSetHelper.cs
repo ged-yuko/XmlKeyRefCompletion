@@ -1,16 +1,16 @@
-﻿using Microsoft.VisualStudio.ComponentModelHost;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Xml.Schema;
+using Microsoft.VisualStudio.ComponentModelHost;
 using Microsoft.VisualStudio.Editor;
 using Microsoft.VisualStudio.Package;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.TextManager.Interop;
 using Microsoft.VisualStudio.XmlEditor;
 using Microsoft.XmlEditor;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Xml.Schema;
 using Package = Microsoft.XmlEditor.Package;
 
 namespace XmlKeyRefCompletion.VsUtils
@@ -26,9 +26,7 @@ namespace XmlKeyRefCompletion.VsUtils
 
         public static bool TryParseXmlDocFromTextView(ITextView textView, out bool isSchema, out XmlSchemaSetHelper helper)
         {
-            IComponentModel componentModel = Package.GetGlobalService(typeof(SComponentModel)) as IComponentModel;
-            IVsEditorAdaptersFactoryService editorFactory = componentModel.GetService<IVsEditorAdaptersFactoryService>();
-            IVsTextView view = editorFactory.GetViewAdapter(textView);
+            IVsTextView view = textView.GetVsTextView();
 
             XmlLanguageService langSvc = (XmlLanguageService)Package.GetGlobalService(Marshal.GetTypeFromCLSID(Guid.Parse("f6819a78-a205-47b5-be1c-675b3c7f0b8e")));
 
@@ -36,13 +34,14 @@ namespace XmlKeyRefCompletion.VsUtils
 
             var doc = langSvc.GetParseTree(source, view, 0, 0, ParseReason.CodeSpan);
 
-            isSchema = true.Equals(doc.GetProperty("IsSchema"));
-            if (doc != null && !isSchema)
+            if (doc != null)
             {
-                helper = new XmlSchemaSetHelper(doc);
+                isSchema = true.Equals(doc.GetProperty("IsSchema"));
+                helper = isSchema ? null : new XmlSchemaSetHelper(doc);
             }
             else
             {
+                isSchema = false;
                 helper = null;
             }
 

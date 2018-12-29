@@ -30,14 +30,17 @@ namespace XmlKeyRefCompletion.Doc
         private readonly List<List<MyXmlText>> _textByLine = new List<List<MyXmlText>>();
 
         public ReadOnlyCollection<MyXmlElement> AllElements { get; private set; }
+        public ReadOnlyCollection<MyXmlAttribute> InvalidKeyrefs { get; private set; }
 
         private readonly List<MyXmlElement> _elements = new List<MyXmlElement>();
+        private readonly List<MyXmlAttribute> _invalidKeyrefs = new List<MyXmlAttribute>();
 
         private MyXmlDocument(XmlTextReader reader)
         {
             _reader = reader;
 
             this.AllElements = new ReadOnlyCollection<MyXmlElement>(_elements);
+            this.InvalidKeyrefs = new ReadOnlyCollection<MyXmlAttribute>(_invalidKeyrefs);
             this.Load(reader);
         }
 
@@ -99,7 +102,7 @@ namespace XmlKeyRefCompletion.Doc
 
         public override XmlAttribute CreateAttribute(string prefix, string localName, string namespaceURI)
         {
-            return new MyXmlAttribute(prefix, localName, namespaceURI, this);
+            return this.SetTextInfo(new MyXmlAttribute(prefix, localName, namespaceURI, this, _invalidKeyrefs));
         }
 
         public override XmlText CreateTextNode(string text)
@@ -176,11 +179,18 @@ namespace XmlKeyRefCompletion.Doc
         }
     }
 
-    internal class MyXmlAttribute : XmlAttribute
+    internal class MyXmlAttribute : XmlAttribute, IXmlTextInfoNode
     {
+        public Location TextLocation { get; set; }
+
+        readonly List<MyXmlAttribute> _invalidKeyrefs;
+
         public XmlScopeKeyPartData ReferencedKeyPartData { get; private set; }
 
-        internal MyXmlAttribute(string prefix, string localName, string namespaceURI, XmlDocument doc) : base(prefix, localName, namespaceURI, doc) { }
+        internal MyXmlAttribute(string prefix, string localName, string namespaceURI, XmlDocument doc, List<MyXmlAttribute> invalidKeyrefs) 
+            : base(prefix, localName, namespaceURI, doc)
+        { _invalidKeyrefs = invalidKeyrefs;
+        }
 
         public void BindKeyPartData(XmlScopeKeyPartData partData)
         {
@@ -188,6 +198,9 @@ namespace XmlKeyRefCompletion.Doc
                 throw new InvalidOperationException();
 
             this.ReferencedKeyPartData = partData;
+
+            if (!partData.HasValue(this.Value))
+                _invalidKeyrefs.Add(this);
         }
     }
 

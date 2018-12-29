@@ -1,15 +1,29 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Linq;
-using System.Text;
-using System.Reflection;
 using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using Microsoft.VisualStudio.ComponentModelHost;
+using Microsoft.VisualStudio.Editor;
+using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.TextManager.Interop;
+using Package = Microsoft.XmlEditor.Package;
 
 namespace XmlKeyRefCompletion
 {
     public static class Extensions
     {
+        public static IVsTextView GetVsTextView(this ITextView textView)
+        {
+            IComponentModel componentModel = Package.GetGlobalService(typeof(SComponentModel)) as IComponentModel;
+            IVsEditorAdaptersFactoryService editorFactory = componentModel.GetService<IVsEditorAdaptersFactoryService>();
+            IVsTextView view = editorFactory.GetViewAdapter(textView);
+
+            return view;
+        }
+
         public static string TrimLength(this string str, int length)
         {
             return str.Length > length ? str.Substring(0, length) : str;

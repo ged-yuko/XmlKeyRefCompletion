@@ -14,9 +14,10 @@ namespace XmlKeyRefCompletion.Doc
         public int Index { get; private set; }
 
         public XmlSchemaXPath PartInfo { get; private set; }
-        public IEnumerable<string> Values { get { return _values; } }
+        public IReadOnlyCollection<string> Values { get { return _values; } }
 
         readonly HashSet<string> _values = new HashSet<string>();
+        readonly Dictionary<string, MyXmlAttribute> _valueDefs = new Dictionary<string, MyXmlAttribute>();
 
         public XmlScopeKeyPartData(XmlScopeKeyData keyData, int index, XmlSchemaXPath partInfo)
         {
@@ -25,9 +26,20 @@ namespace XmlKeyRefCompletion.Doc
             this.PartInfo = partInfo;
         }
 
-        public void RegisterValue(string value)
+        public void RegisterValue(MyXmlAttribute attr)
         {
-            _values.Add(value);
+            _values.Add(attr.Value);
+            _valueDefs.Add(attr.Value, attr);
+        }
+
+        public bool TryGetValueDef(string value, out MyXmlAttribute defAttr)
+        {
+            return _valueDefs.TryGetValue(value, out defAttr);
+        }
+
+        public bool HasValue(string value)
+        {
+            return _values.Contains(value);
         }
     }
 
