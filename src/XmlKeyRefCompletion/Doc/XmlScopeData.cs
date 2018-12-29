@@ -14,9 +14,10 @@ namespace XmlKeyRefCompletion.Doc
         public int Index { get; private set; }
 
         public XmlSchemaXPath PartInfo { get; private set; }
-        public IReadOnlyCollection<string> Values { get { return _values; } }
+        // public IReadOnlyCollection<string> Values { get { return _values; } }
+        public IReadOnlyCollection<string> Values { get { return _valueDefs.Keys; } }
 
-        readonly HashSet<string> _values = new HashSet<string>();
+        // readonly HashSet<string> _values = new HashSet<string>();
         readonly Dictionary<string, MyXmlAttribute> _valueDefs = new Dictionary<string, MyXmlAttribute>();
 
         public XmlScopeKeyPartData(XmlScopeKeyData keyData, int index, XmlSchemaXPath partInfo)
@@ -28,7 +29,7 @@ namespace XmlKeyRefCompletion.Doc
 
         public void RegisterValue(MyXmlAttribute attr)
         {
-            _values.Add(attr.Value);
+            // _values.Add(attr.Value);
             _valueDefs.Add(attr.Value, attr);
         }
 
@@ -37,9 +38,20 @@ namespace XmlKeyRefCompletion.Doc
             return _valueDefs.TryGetValue(value, out defAttr);
         }
 
-        public bool HasValue(string value)
+        //public bool HasValue(string value)
+        //{
+        //    //return _values.Contains(value);
+        //    return _valueDefs.ContainsKey(value);
+        //}
+
+        public bool RegisterReference(MyXmlAttribute reference)
         {
-            return _values.Contains(value);
+            var hasTarget = _valueDefs.TryGetValue(reference.Value, out var target);
+
+            if (hasTarget)
+                target.RegisterReference(reference);
+
+            return hasTarget;
         }
     }
 

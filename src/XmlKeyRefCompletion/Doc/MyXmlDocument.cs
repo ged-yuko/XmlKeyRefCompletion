@@ -183,13 +183,17 @@ namespace XmlKeyRefCompletion.Doc
     {
         public Location TextLocation { get; set; }
 
-        readonly List<MyXmlAttribute> _invalidKeyrefs;
+        private readonly List<MyXmlAttribute> _invalidKeyrefs;
+
+        public IReadOnlyCollection<MyXmlAttribute> References { get { return _references; } }
+        private HashSet<MyXmlAttribute> _references = null;
 
         public XmlScopeKeyPartData ReferencedKeyPartData { get; private set; }
 
-        internal MyXmlAttribute(string prefix, string localName, string namespaceURI, XmlDocument doc, List<MyXmlAttribute> invalidKeyrefs) 
+        internal MyXmlAttribute(string prefix, string localName, string namespaceURI, XmlDocument doc, List<MyXmlAttribute> invalidKeyrefs)
             : base(prefix, localName, namespaceURI, doc)
-        { _invalidKeyrefs = invalidKeyrefs;
+        {
+            _invalidKeyrefs = invalidKeyrefs;
         }
 
         public void BindKeyPartData(XmlScopeKeyPartData partData)
@@ -199,8 +203,14 @@ namespace XmlKeyRefCompletion.Doc
 
             this.ReferencedKeyPartData = partData;
 
-            if (!partData.HasValue(this.Value))
+            if (!partData.RegisterReference(this))
                 _invalidKeyrefs.Add(this);
+        }
+
+        public void RegisterReference(MyXmlAttribute reference)
+        {
+            var refs = _references ?? (_references = new HashSet<MyXmlAttribute>());
+            refs.Add(reference);
         }
     }
 

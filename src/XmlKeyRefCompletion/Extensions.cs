@@ -23,7 +23,7 @@ namespace XmlKeyRefCompletion
 
             return view;
         }
-
+        
         public static string TrimLength(this string str, int length)
         {
             return str.Length > length ? str.Substring(0, length) : str;

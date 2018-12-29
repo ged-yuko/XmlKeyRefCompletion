@@ -7,11 +7,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Timers;
+using EnvDTE;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Editor;
 using Microsoft.VisualStudio.Language.Intellisense;
 using Microsoft.VisualStudio.OLE.Interop;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.TextManager.Interop;
@@ -32,6 +34,8 @@ namespace XmlKeyRefCompletion
         internal ICompletionBroker CompletionBroker { get; set; }
         [Import]
         internal SVsServiceProvider ServiceProvider { get; set; }
+        [Import]
+        public ITextDocumentFactoryService TextDocumentFactoryService { get; set; }
 
         private readonly FileChangeListener _fileChangeListener;
 
@@ -50,6 +54,8 @@ namespace XmlKeyRefCompletion
             textView.Properties.GetOrCreateSingletonProperty(typeof(XmlKeyRefCompletionCommandHandler).GUID, createCommandHandler);
         }
     }
+
+    // TODO: refactor it all!
 
     [Guid("41E35D93-7736-45F0-9A74-E972B775B560")]
     internal class XmlKeyRefCompletionCommandHandler : IOleCommandTarget
@@ -100,9 +106,12 @@ namespace XmlKeyRefCompletion
 
         private int QueryStatusImpl(Guid pguidCmdGroup, OLECMD cmd)
         {
+            if (pguidCmdGroup == VSConstants.GUID_VSStandardCommandSet97)
+                Debug.Print("Query {0}-{1}", "GUID_VSStandardCommandSet97", (VSConstants.VSStd97CmdID)cmd.cmdID);
+
             if (pguidCmdGroup == typeof(VSConstants.VSStd2KCmdID).GUID)
             {
-                // Debug.Print("Query {0}-{1}", "VSStd2KCmdID", (VSConstants.VSStd2KCmdID)cmd.cmdID);
+                Debug.Print("Query {0}-{1}", "VSStd2KCmdID", (VSConstants.VSStd2KCmdID)cmd.cmdID);
 
                 switch ((VSConstants.VSStd2KCmdID)cmd.cmdID)
                 {
@@ -111,6 +120,15 @@ namespace XmlKeyRefCompletion
                     //case VSConstants.VSStd2KCmdID.PARAMINFO:
                     //case VSConstants.VSStd2KCmdID.QUICKINFO:
                     case VSConstants.VSStd2KCmdID.AUTOCOMPLETE:
+                        return (int)OLECMDF.OLECMDF_ENABLED | (int)OLECMDF.OLECMDF_SUPPORTED;
+                }
+            }
+            else if (pguidCmdGroup == VSConstants.GUID_VSStandardCommandSet97)
+            {
+                switch ((VSConstants.VSStd97CmdID)cmd.cmdID)
+                {
+                    case VSConstants.VSStd97CmdID.GotoDefn:
+                    case VSConstants.VSStd97CmdID.FindReferences:
                         return (int)OLECMDF.OLECMDF_ENABLED | (int)OLECMDF.OLECMDF_SUPPORTED;
                 }
             }
@@ -137,7 +155,9 @@ namespace XmlKeyRefCompletion
             //    catch { }
             //}
 
-            if (pguidCmdGroup == VSConstants.GUID_VSStandardCommandSet97 && nCmdID == (int)VSConstants.VSStd97CmdID.GotoDefn)
+            if (pguidCmdGroup == VSConstants.GUID_VSStandardCommandSet97 && (
+                nCmdID == (int)VSConstants.VSStd97CmdID.GotoDefn || nCmdID == (int)VSConstants.VSStd97CmdID.FindReferences
+                ))
             {
                 var doc = this.DocumentDataLoader.DocumentData;
                 if (doc == null)
@@ -148,6 +168,8 @@ namespace XmlKeyRefCompletion
 
                 if (doc != null)
                 {
+                    var snapshot = this.DocumentDataLoader.CurrentSnapshot;
+
                     var pos = m_textView.Caret.Position.BufferPosition;
                     var line = pos.GetContainingLine();
                     var lineNumber = line.LineNumber;
@@ -155,18 +177,70 @@ namespace XmlKeyRefCompletion
 
                     var text = doc.FindTextAt(lineNumber, linePosition);
                     var attr = text?.ParentNode as MyXmlAttribute;
-                    if (attr != null && attr.ReferencedKeyPartData != null)
-                    {
-                        if (attr.ReferencedKeyPartData.TryGetValueDef(attr.Value, out var targetAttr))
-                        {
-                            var targetText = targetAttr.ChildNodes.OfType<MyXmlText>().FirstOrDefault();
-                            if (targetText != null)
-                            {
-                                var targetLine = this.DocumentDataLoader.CurrentSnapshot.GetLineFromLineNumber(targetText.TextLocation.Line - 1);
-                                var targetPosition = targetLine.Start.Position + targetText.TextLocation.Column - 1;
 
-                                m_textView.Caret.MoveTo(new SnapshotPoint(this.DocumentDataLoader.CurrentSnapshot, targetPosition));
-                                m_textView.Caret.EnsureVisible();
+                    if (attr != null)
+                    {
+                        if (nCmdID == (int)VSConstants.VSStd97CmdID.GotoDefn)
+                        {
+                            if (attr.ReferencedKeyPartData != null && attr.ReferencedKeyPartData.TryGetValueDef(attr.Value, out var targetAttr))
+                            {
+                                var targetText = targetAttr.ChildNodes.OfType<MyXmlText>().FirstOrDefault();
+
+                                if (targetText != null)
+                                {
+                                    var targetLine = this.DocumentDataLoader.CurrentSnapshot.GetLineFromLineNumber(targetText.TextLocation.Line - 1);
+                                    var targetPosition = targetLine.Start.Position + targetText.TextLocation.Column - 1;
+
+                                    m_textView.Caret.MoveTo(new SnapshotPoint(this.DocumentDataLoader.CurrentSnapshot, targetPosition));
+                                    m_textView.Caret.EnsureVisible();
+                                }
+                            }
+                        }
+                        else if (nCmdID == (int)VSConstants.VSStd97CmdID.FindReferences)
+                        {
+                            MyXmlAttribute defAttr;
+                            if (attr.ReferencedKeyPartData == null || !attr.ReferencedKeyPartData.TryGetValueDef(attr.Value, out defAttr))
+                                defAttr = attr;
+
+                            var defLocation = defAttr.ChildNodes.OfType<MyXmlText>().FirstOrDefault()?.TextLocation ?? defAttr.TextLocation;
+
+                            var refs = defAttr.References;
+                            if (refs != null)
+                            {
+                                IVsOutputWindow outWindow = Package.GetGlobalService(typeof(SVsOutputWindow)) as IVsOutputWindow;
+
+                                // Use e.g. Tools -> Create GUID to make a stable, but unique GUID for your pane.
+                                // Also, in a real project, this should probably be a static constant, and not a local variable
+                                Guid customGuid = new Guid("D9090DD3-1BA3-4702-9697-C534D95810A9");
+                                string customTitle = "Xml Key References";
+                                outWindow.CreatePane(ref customGuid, customTitle, 1, 1);
+
+                                IVsOutputWindowPane customPane;
+                                outWindow.GetPane(ref customGuid, out customPane);
+
+                                ITextDocument document;
+                                var filePath = m_provider.TextDocumentFactoryService.TryGetTextDocument(m_textView.TextDataModel.DocumentBuffer, out document) ? document.FilePath : "Current document";
+
+                                customPane.OutputString("Searching references to key " + attr.Value + " in " + filePath + " at " + DateTime.Now + Environment.NewLine);
+                                customPane.Activate(); // Brings this pane into view
+
+                                customPane.OutputString($"{filePath}({defLocation.Line},{defLocation.Column}): Definition: {snapshot.GetLineFromLineNumber(defLocation.Line - 1).GetText()}{Environment.NewLine}");
+                                foreach (var refAttr in defAttr.References ?? new MyXmlAttribute[0])
+                                {
+                                    var itemLocation = refAttr.ChildNodes.OfType<MyXmlText>().FirstOrDefault()?.TextLocation ?? refAttr.TextLocation;
+                                    customPane.OutputString($"{filePath}({itemLocation.Line},{itemLocation.Column}): Reference: {snapshot.GetLineFromLineNumber(itemLocation.Line - 1).GetText()}{Environment.NewLine}");
+                                }
+
+                                customPane.OutputString($"Finished.{Environment.NewLine}");
+
+                                customPane.OutputString(Environment.NewLine);
+                                customPane.OutputString(Environment.NewLine);
+
+                                const string vsWindowKindOutput = "{34E76E81-EE4A-11D0-AE2E-00A0C90FFFC3}";
+                                DTE dte = Package.GetGlobalService(typeof(SDTE)) as DTE;
+                                Window win = dte.Windows.Item(vsWindowKindOutput);
+                                win.Visible = true;
+                                win.Activate();
                             }
                         }
                     }
