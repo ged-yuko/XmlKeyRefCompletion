@@ -52,51 +52,52 @@ namespace XmlKeyRefCompletion
                 if (session.TextView.Properties.TryGetProperty<XmlKeyRefCompletionCommandHandler>(typeof(XmlKeyRefCompletionCommandHandler).GUID, out var completionCommandHandler))
                 {
 
+                    completionCommandHandler.DocumentDataLoader.ForceReload();
+
                     var doc = completionCommandHandler.DocumentDataLoader.DocumentData;
                     if (doc != null)
                     {
 
-                        var triggerPoint = session.GetTriggerPoint(_textBuffer);
-
-                        var point = triggerPoint.GetPoint(session.TextView.TextSnapshot);
-                        var line = point.GetContainingLine();
-                        var lineNumber = line.LineNumber;
-                        var linePosition = point.Position - line.Start.Position;
-
-                        var text = doc.FindTextAt(lineNumber, linePosition);
-                        var attr = text?.ParentNode as MyXmlAttribute;
-
-                        if (text != null && attr != null && attr.ReferencedKeyPartData != null && linePosition < text.TextLocation.Column + text.Length)
+                        var mayBePoint = session.GetTriggerPoint(session.TextView.TextSnapshot);
+                        if (mayBePoint.HasValue)
                         {
-                            var compList = new List<Completion>();
-                            foreach (string str in attr.ReferencedKeyPartData.Values)
-                                compList.Add(new Completion(str, str, str, null, null));
+                            var point = mayBePoint.Value;
+                            var line = point.GetContainingLine();
+                            var lineNumber = line.LineNumber;
+                            var linePosition = point.Position - line.Start.Position;
 
-                            var key = attr.ReferencedKeyPartData.KeyData;
-                            var part = attr.ReferencedKeyPartData;
+                            var text = doc.FindTextAt(lineNumber, linePosition);
+                            var attr = text?.ParentNode as MyXmlAttribute;
 
-                            var name = "Keys of " + (key.Arity > 1 ? (key.Name + "#" + part.PartInfo.Id ?? part.Index.ToString()) : key.Name);
+                            if (text != null && attr != null && attr.ReferencedKeyPartData != null && linePosition < text.TextLocation.Column + text.Length)
+                            {
+                                var compList = new List<Completion>();
+                                foreach (string str in attr.ReferencedKeyPartData.Values.OrderBy(s => s))
+                                    compList.Add(new Completion(str, str, str, null, null));
 
-                            completionSets.Add(new CompletionSet(
-                                name,
-                                name,
-                                this.FindTokenSpanAtPosition(triggerPoint, session),
-                                compList,
-                                null)
-                            );
-                        }
-                        else
-                        {
-                            var compList = new List<Completion>();
+                                var key = attr.ReferencedKeyPartData.KeyData;
+                                var part = attr.ReferencedKeyPartData;
 
-                            var name = "Keys...";
-                            completionSets.Add(new CompletionSet(
-                                name,    //the non-localized title of the tab
-                                name,    //the display title of the tab
-                                this.FindTokenSpanAtPosition(triggerPoint, session),
-                                compList,
-                                null)
-                            );
+                                var name = "Keys of " + (key.Arity > 1 ? (key.Name + "#" + part.PartInfo.Id ?? part.Index.ToString()) : key.Name);
+
+                                var trackingSpanLine = line.Snapshot.GetLineFromLineNumber(text.TextLocation.Line - 1);
+                                var trackingSpanPosition = trackingSpanLine.Start.Position + text.TextLocation.Column - 1;
+                                var trackingSpan = point.Snapshot.CreateTrackingSpan(trackingSpanPosition, text.Value.Length, SpanTrackingMode.EdgeInclusive);
+
+                                completionSets.Add(new CompletionSet(
+                                    name,
+                                    name,
+                                    //this.FindTokenSpanAtPosition(session, point),
+                                    trackingSpan,
+                                    compList,
+                                    null)
+                                );
+                            }
+                            else
+                            {
+                                var compList = new List<Completion>();
+                                completionSets.Add(new CompletionSet());
+                            }
                         }
                     }
                 }
@@ -107,13 +108,14 @@ namespace XmlKeyRefCompletion
             }
         }
 
-        private ITrackingSpan FindTokenSpanAtPosition(ITrackingPoint point, ICompletionSession session)
-        {
-            SnapshotPoint currentPoint = (session.TextView.Caret.Position.BufferPosition) - 1;
-            ITextStructureNavigator navigator = _sourceProvider.NavigatorService.GetTextStructureNavigator(_textBuffer);
-            TextExtent extent = navigator.GetExtentOfWord(currentPoint);
-            return currentPoint.Snapshot.CreateTrackingSpan(extent.Span, SpanTrackingMode.EdgeInclusive);
-        }
+        //private ITrackingSpan FindTokenSpanAtPosition(ICompletionSession session, SnapshotPoint point)
+        //{
+        //    //SnapshotPoint currentPoint = (session.TextView.Caret.Position.BufferPosition) - 1;
+        //    //ITextStructureNavigator navigator = _sourceProvider.NavigatorService.GetTextStructureNavigator(_textBuffer);
+        //    //TextExtent extent = navigator.GetExtentOfWord(currentPoint);
+        //    point.GetContainingLine().GetText().LastIndexOf('"', point.Position)
+        //    return currentPoint.Snapshot.CreateTrackingSpan(, SpanTrackingMode.EdgeInclusive);
+        //}
 
         private bool m_isDisposed = false;
 

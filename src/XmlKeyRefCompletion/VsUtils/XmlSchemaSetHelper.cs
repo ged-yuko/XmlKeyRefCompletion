@@ -24,7 +24,7 @@ namespace XmlKeyRefCompletion.VsUtils
             _doc = doc;
         }
 
-        public static bool TryParseXmlDocFromTextView(ITextView textView, out XmlSchemaSetHelper helper)
+        public static bool TryParseXmlDocFromTextView(ITextView textView, out bool isSchema, out XmlSchemaSetHelper helper)
         {
             IComponentModel componentModel = Package.GetGlobalService(typeof(SComponentModel)) as IComponentModel;
             IVsEditorAdaptersFactoryService editorFactory = componentModel.GetService<IVsEditorAdaptersFactoryService>();
@@ -36,7 +36,8 @@ namespace XmlKeyRefCompletion.VsUtils
 
             var doc = langSvc.GetParseTree(source, view, 0, 0, ParseReason.CodeSpan);
 
-            if (doc != null && false.Equals(doc.GetProperty("IsSchema")))
+            isSchema = true.Equals(doc.GetProperty("IsSchema"));
+            if (doc != null && !isSchema)
             {
                 helper = new XmlSchemaSetHelper(doc);
             }

@@ -14,8 +14,8 @@ namespace XmlKeyRefCompletion.Doc
 {
     internal class XmlDocumentLoader
     {
-        public static readonly TimeSpan InitTimeout = TimeSpan.FromSeconds(1);
-        public static readonly TimeSpan EditTimeout = TimeSpan.FromSeconds(3);
+        public static readonly TimeSpan InitTimeout = TimeSpan.FromSeconds(3);
+        public static readonly TimeSpan EditTimeout = TimeSpan.FromSeconds(1);
 
         private readonly Timer _reloadTimer;
 
@@ -39,13 +39,25 @@ namespace XmlKeyRefCompletion.Doc
 
         private void ReloadDocument()
         {
-            Debug.Print("Reloading..");
-            this.DocumentData = this.TryLoadDocument(_textView, out var doc) ? doc : null;
+            if (!_textView.IsClosed)
+            {
+                Debug.Print("Reloading..");
+                this.DocumentData = this.TryLoadDocument(_textView, out var doc) ? doc : null;
+            }
+        }
+
+        public void ForceReload()
+        {
+            _reloadTimer.Stop();
+            this.ReloadDocument();
         }
 
         public void ScheduleReloading(TimeSpan interval)
         {
             Debug.Print("Scheduling reload in " + interval);
+
+            this.DocumentData = null;
+
             _reloadTimer.Stop();
             _reloadTimer.Interval = interval.TotalMilliseconds;
             _reloadTimer.Start();
@@ -59,21 +71,24 @@ namespace XmlKeyRefCompletion.Doc
             {
                 var schemaElement = element.SchemaInfo.SchemaElement;
 
-                refsDataCollected |= this.TryCollectElementData(element, schemaElement);
-
-                if (!schemaElement.RefName.IsEmpty)
+                if (schemaElement != null)
                 {
-                    var referencedSchemaElements = doc.Schemas.Schemas(schemaElement.RefName.Namespace)
-                                                      .OfType<XmlSchema>()
-                                                      .Select(s => s.Elements[schemaElement.RefName])
-                                                      .OfType<XmlSchemaElement>()
-                                                      .ToList();
+                    refsDataCollected |= this.TryCollectElementData(element, schemaElement);
 
-                    if (referencedSchemaElements.Count > 1)
-                        Debug.Print("wtf");
+                    if (!schemaElement.RefName.IsEmpty)
+                    {
+                        var referencedSchemaElements = doc.Schemas.Schemas(schemaElement.RefName.Namespace)
+                                                          .OfType<XmlSchema>()
+                                                          .Select(s => s.Elements[schemaElement.RefName])
+                                                          .OfType<XmlSchemaElement>()
+                                                          .ToList();
 
-                    foreach (var referencedSchemaElement in referencedSchemaElements)
-                        refsDataCollected |= this.TryCollectElementData(element, referencedSchemaElement);
+                        if (referencedSchemaElements.Count > 1)
+                            Debug.Print("wtf");
+
+                        foreach (var referencedSchemaElement in referencedSchemaElements)
+                            refsDataCollected |= this.TryCollectElementData(element, referencedSchemaElement);
+                    }
                 }
             }
 
@@ -201,7 +216,7 @@ namespace XmlKeyRefCompletion.Doc
         {
             try
             {
-                if (XmlSchemaSetHelper.TryParseXmlDocFromTextView(textView, out var schemaSetHelper))
+                if (XmlSchemaSetHelper.TryParseXmlDocFromTextView(textView, out var isSchema, out var schemaSetHelper))
                 {
                     if (schemaSetHelper.TryResolveSchemaSetForXmlDocTextView(out var schemaSet, out var retryLater))
                     {
@@ -229,7 +244,9 @@ namespace XmlKeyRefCompletion.Doc
                 else
                 {
                     doc = null;
-                    this.ScheduleReloading(InitTimeout);
+
+                    if (!isSchema)
+                        this.ScheduleReloading(InitTimeout);
                 }
             }
             catch

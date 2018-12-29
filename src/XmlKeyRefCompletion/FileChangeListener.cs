@@ -47,7 +47,7 @@ namespace XmlKeyRefCompletion
             {
                 Guid id = typeof(XmlKeyRefCompletionCommandHandler).GUID;
                 userData.GetData(ref id, out var cmdHandler);
-                (cmdHandler as XmlKeyRefCompletionCommandHandler)?.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.InitTimeout);
+                // (cmdHandler as XmlKeyRefCompletionCommandHandler)?.DocumentDataLoader.ScheduleReloading(XmlDocumentLoader.InitTimeout);
             }
         }
 
