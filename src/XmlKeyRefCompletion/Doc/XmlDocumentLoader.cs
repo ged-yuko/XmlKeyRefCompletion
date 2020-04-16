@@ -1,6 +1,4 @@
-﻿using Microsoft.VisualStudio.Text;
-using Microsoft.VisualStudio.Text.Editor;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -9,7 +7,12 @@ using System.Text;
 using System.Timers;
 using System.Xml;
 using System.Xml.Schema;
-using XmlKeyRefCompletion.VsUtils;
+using EnvDTE;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.VisualStudio.Text;
+using Microsoft.VisualStudio.Text.Editor;
+// using XmlKeyRefCompletion.VsUtils;
 
 namespace XmlKeyRefCompletion.Doc
 {
@@ -221,39 +224,48 @@ namespace XmlKeyRefCompletion.Doc
         {
             try
             {
-                if (XmlSchemaSetHelper.TryParseXmlDocFromTextView(textView, out var isSchema, out var schemaSetHelper))
+                //if (XmlSchemaSetHelper.TryParseXmlDocFromTextView(textView, out var isSchema, out var schemaSetHelper))
+                //{
+                //    if (schemaSetHelper.TryResolveSchemaSetForXmlDocTextView(out var schemaSet, out var retryLater))
+                //    {
+
+                this.CurrentSnapshot = textView.TextBuffer.CurrentSnapshot;
+                var text = this.CurrentSnapshot.GetText();
+                doc = MyXmlDocument.LoadWithTextInfo(new StringReader(text));
+
+                if (this.TryResolveSchemas(doc, out var schemaSet))
                 {
-                    if (schemaSetHelper.TryResolveSchemaSetForXmlDocTextView(out var schemaSet, out var retryLater))
-                    {
-                        this.CurrentSnapshot = textView.TextBuffer.CurrentSnapshot;
-                        var text = this.CurrentSnapshot.GetText();
-                        doc = MyXmlDocument.LoadWithTextInfo(new StringReader(text));
+                    doc.Schemas = schemaSet;
+                    doc.Validate((sender, ea) => {
+                        System.Diagnostics.Debug.Print("Logged: " + ea.Severity + " : " + ea.Message);
+                        if (ea.Exception != null)
+                            System.Diagnostics.Debug.Print("Logged: " + ea.Exception.ToString());
+                    });
 
-                        doc.Schemas = schemaSet;
-                        doc.Validate((sender, ea) => {
-                            System.Diagnostics.Debug.Print("Logged: " + ea.Severity + " : " + ea.Message);
-                            if (ea.Exception != null)
-                                System.Diagnostics.Debug.Print("Logged: " + ea.Exception.ToString());
-                        });
-
-                        if (!this.TryFillCompletionData(doc))
-                            doc = null;
-                    }
-                    else
-                    {
+                    if (!this.TryFillCompletionData(doc))
                         doc = null;
-
-                        if (retryLater)
-                            this.ScheduleReloading(InitTimeout);
-                    }
                 }
                 else
                 {
                     doc = null;
-
-                    if (!isSchema)
-                        this.ScheduleReloading(InitTimeout);
                 }
+
+                //    }
+                //    else
+                //    {
+                //        doc = null;
+
+                //        if (retryLater)
+                //            this.ScheduleReloading(InitTimeout);
+                //    }
+                //}
+                //else
+                //{
+                //    doc = null;
+
+                //    if (!isSchema)
+                //        this.ScheduleReloading(InitTimeout);
+                //}
             }
             catch (Exception ex)
             {
@@ -262,6 +274,140 @@ namespace XmlKeyRefCompletion.Doc
             }
 
             return doc != null;
+        }
+
+        private class SchemaInfo
+        {
+            public XmlSchema SchemaIfLoaded { get; private set; }
+            public string Namespace { get; private set; }
+
+            public FileInfo File { get; private set; }
+            public DateTime LoadStamp { get; private set; }
+
+            public SchemaInfo(string fileName)
+            {
+                this.SchemaIfLoaded = null;
+                this.Namespace = null;
+                this.File = new FileInfo(fileName);
+                this.LoadStamp = DateTime.MinValue;
+            }
+
+            public void Refresh()
+            {
+                if (this.File.CreationTime > this.LoadStamp || this.File.LastWriteTime > this.LoadStamp || this.SchemaIfLoaded == null)
+                {
+                    try
+                    {
+                        using (var reader = this.File.OpenRead())
+                        {
+                            var ok = true;
+                            this.SchemaIfLoaded = XmlSchema.Read(reader, (o, ea) => ok &= ea.Severity == XmlSeverityType.Error);
+
+                            if (!ok)
+                                this.SchemaIfLoaded = null;
+
+                            this.Namespace = this.SchemaIfLoaded.TargetNamespace;
+                            this.LoadStamp = DateTime.Now;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        this.SchemaIfLoaded = null;
+                        this.Namespace = null;
+                    }
+                }
+            }
+        }
+
+        private static Dictionary<string, SchemaInfo> _schemaByNamespace = new Dictionary<string, SchemaInfo>();
+        private static Dictionary<string, SchemaInfo> _schemaByFilePath = new Dictionary<string, SchemaInfo>();
+
+        private void IntroduceSchema(string filePath)
+        {
+            if (!_schemaByFilePath.TryGetValue(filePath, out var info))
+            {
+                info = new SchemaInfo(filePath);
+                _schemaByFilePath.Add(filePath, info);
+            }
+
+            var oldNs = info.Namespace;
+
+            info.Refresh();
+
+            if (oldNs != info.Namespace)
+            {
+                if (oldNs != null && _schemaByNamespace.TryGetValue(oldNs, out var oldInfo))
+                    _schemaByNamespace.Remove(oldNs);
+
+                if (info.Namespace != null)
+                    _schemaByNamespace[info.Namespace] = info;
+            }
+        }
+
+        private bool TryResolveSchemas(XmlDocument doc, out XmlSchemaSet schemaSet)
+        {
+            var solutionSchemas = this.GetSolutionFiles().Where(f => Path.GetFileName(f).EndsWith(".xsd", StringComparison.InvariantCultureIgnoreCase));
+            var ok = true;
+
+            foreach (var item in solutionSchemas)
+                this.IntroduceSchema(item);
+
+            schemaSet = new XmlSchemaSet();
+
+            foreach (var node in doc.DocumentElement.Flatten(n => n.ChildNodes.OfType<XmlElement>()))
+            {
+                foreach (var attr in node.Attributes.OfType<XmlAttribute>())
+                {
+                    if (attr.Name == "xmlns" || attr.Name.StartsWith("xmlns:"))
+                    {
+                        if (ok &= _schemaByNamespace.TryGetValue(attr.Value, out var schemaInfo))
+                            schemaSet.Add(schemaInfo.SchemaIfLoaded);
+                        else
+                            break;
+                    }
+                }
+            }
+
+            return ok;
+        }
+
+        private IEnumerable<string> GetSolutionFiles()
+        {
+            var dte = (DTE)Package.GetGlobalService(typeof(SDTE));
+
+            IEnumerable<string> ScanProject(Project project)
+            {
+                if (project != null)
+                {
+                    var name = project.FileName;
+                    if (!string.IsNullOrWhiteSpace(name))
+                        yield return name;
+
+                    foreach (ProjectItem item in project.ProjectItems)
+                        foreach (var file in ScanProjectItem(item))
+                            yield return file;
+                }
+            }
+
+            IEnumerable<string> ScanProjectItem(ProjectItem item)
+            {
+                if (item != null)
+                {
+                    var name = item.FileNames[0];
+                    if (!string.IsNullOrWhiteSpace(name))
+                        yield return name;
+
+                    if (item.ProjectItems != null)
+                        foreach (ProjectItem subitem in item.ProjectItems)
+                            if (subitem != item)
+                                foreach (var file in ScanProjectItem(subitem))
+                                    yield return file;
+                }
+            }
+
+            foreach (Project project in dte.Solution)
+                foreach (var file in ScanProject(project).Where(f => File.Exists(f)))
+                    yield return file;
         }
     }
 }
